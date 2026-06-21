@@ -1,0 +1,18 @@
+# Secrets (never commit)
+esp_web_temp_ctrl/secrets.h
+**/secrets.h
+
+# macOS
+.DS_Store
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build / Arduino
+*.elf
+*.bin
+*.hex
