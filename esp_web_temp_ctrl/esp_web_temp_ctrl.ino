@@ -90,7 +90,8 @@ bool shellyCurrentState = false;
 // Shelly switch — SHELLY_TIMEOUT_MS caps blocking time if Shelly is unreachable
 void shellySwitch(bool state) {
   WiFiClient client;
-  if (!client.connect(shelly_ip, 80, SHELLY_TIMEOUT_MS)) {
+  client.setTimeout(SHELLY_TIMEOUT_MS);
+  if (!client.connect(shelly_ip, 80)) {
     Serial.println("Shelly connection failed");
     return;
   }
@@ -104,7 +105,8 @@ void shellySwitch(bool state) {
 
 bool shellyReachable() {
   WiFiClient client;
-  if (!client.connect(shelly_ip, 80, SHELLY_TIMEOUT_MS)) return false;
+  client.setTimeout(SHELLY_TIMEOUT_MS);
+  if (!client.connect(shelly_ip, 80)) return false;
   client.print("GET /relay/0 HTTP/1.1\r\nHost: " + String(shelly_ip) + "\r\nConnection: close\r\n\r\n");
   unsigned long t = millis();
   while (client.connected() && (millis() - t < SHELLY_TIMEOUT_MS)) {
@@ -116,7 +118,8 @@ bool shellyReachable() {
 
 bool shellyGetState() {
   WiFiClient client;
-  if (!client.connect(shelly_ip, 80, SHELLY_TIMEOUT_MS)) return false;
+  client.setTimeout(SHELLY_TIMEOUT_MS);
+  if (!client.connect(shelly_ip, 80)) return false;
   client.print("GET /relay/0 HTTP/1.1\r\nHost: " + String(shelly_ip) + "\r\nConnection: close\r\n\r\n");
   String response = "";
   unsigned long t = millis();
