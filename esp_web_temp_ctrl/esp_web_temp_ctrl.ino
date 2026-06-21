@@ -17,15 +17,23 @@ DallasTemperature sensors(&oneWire);
 // DS18B20 returns -127 on read error and 85.0 as power-on default — both must be rejected.
 // TEMP_VALID_MAX is set to 100°C (above any realistic setpoint) rather than the hardware
 // max of 125°C, to reject implausible high readings.
-#define TEMP_VALID_MIN      -40.0f
-#define TEMP_VALID_MAX      100.0f
-#define NUM_SAMPLES          5
-#define DS18B20_WAIT_MS    160      // 9-bit conversion ~94ms, with margin
-#define SHELLY_TIMEOUT_MS 1000      // TCP connect timeout – keeps loop responsive
+#define TEMP_VALID_MIN        -40.0f
+#define TEMP_VALID_MAX        100.0f
+#define NUM_SAMPLES             5
+#define DS18B20_WAIT_MS       160    // 9-bit conversion ~94ms, with margin
+#define SHELLY_TIMEOUT_MS    1000    // TCP connect timeout – keeps loop responsive
+// A state change (on→off or off→on) is only sent to Shelly after this many consecutive
+// PID rounds agree. Each round is NUM_SAMPLES × DS18B20_WAIT_MS ≈ 0.8 s, so 3 rounds
+// requires ~2.4 s of consistent readings before the relay switches.
+#define SWITCH_CONFIRM_ROUNDS   3
 
 // NAN = no valid reading received yet; suppresses PID until sensor is confirmed working
 float lastValidInput = NAN;
 bool hasValidInput = false;
+
+// Relay confirmation state: track how many consecutive rounds agree on a pending switch
+bool pendingShellyState = false;
+int shellyConfirmCount  = 0;
 
 // True non-blocking temperature state machine (no delay() calls)
 enum TempPhase { PHASE_REQUEST, PHASE_READ };
@@ -262,13 +270,39 @@ bool isValidTemp(float t) {
 }
 
 // Run PID and update Shelly. Called only when a valid temperature is available.
+// Relay only switches after SWITCH_CONFIRM_ROUNDS consecutive rounds agree on the new
+// state, preventing erroneous sensor readings from causing spurious on/off cycling.
 void applyPIDControl() {
   if (!hasValidInput) return;
   Output = myPID.Run(Input);
   bool desiredState = (Output > 0);
-  if (desiredState != shellyCurrentState) {
+
+  if (desiredState == shellyCurrentState) {
+    // Desired matches current — nothing to do, reset any pending confirmation
+    shellyConfirmCount = 0;
+    return;
+  }
+
+  // Desired differs from current — count consecutive rounds that agree
+  if (desiredState == pendingShellyState) {
+    shellyConfirmCount++;
+  } else {
+    pendingShellyState = desiredState;
+    shellyConfirmCount = 1;
+  }
+
+  if (shellyConfirmCount >= SWITCH_CONFIRM_ROUNDS) {
+    Serial.print("Relay switch confirmed: ");
+    Serial.println(desiredState ? "ON" : "OFF");
     shellySwitch(desiredState);
     shellyCurrentState = desiredState;
+    shellyConfirmCount = 0;
+  } else {
+    Serial.print("Relay switch pending (");
+    Serial.print(shellyConfirmCount);
+    Serial.print("/");
+    Serial.print(SWITCH_CONFIRM_ROUNDS);
+    Serial.println(")");
   }
 }
 
