@@ -19,7 +19,6 @@ DallasTemperature sensors(&oneWire);
 // max of 125°C, to reject implausible high readings.
 #define TEMP_VALID_MIN      -40.0f
 #define TEMP_VALID_MAX      100.0f
-#define TEMP_SPIKE_MAX_DELTA 10.0f  // Reject reading if it jumps > this far from last valid
 #define NUM_SAMPLES          5
 #define DS18B20_WAIT_MS    160      // 9-bit conversion ~94ms, with margin
 #define SHELLY_TIMEOUT_MS 1000      // TCP connect timeout – keeps loop responsive
@@ -246,24 +245,19 @@ void handleSet() {
 void handleManual() {
   manualState = !manualState;
   shellySwitch(manualState);
+  shellyCurrentState = manualState;  // keep tracking state in sync for auto mode handover
   server.sendHeader("Location", "/");
   server.send(303);
 }
 
-// Validate a raw sensor reading before accepting it into the average
+// Validate a raw sensor reading before accepting it into the average.
+// DS18B20 errors are binary (-127°C on CRC fail, 85°C on power-on), not gradual noise,
+// so range + power-on checks are sufficient; a spike filter would reject legitimate
+// fast temperature changes and cause Input to get stuck at a stale value.
 bool isValidTemp(float t) {
   if (isnan(t)) return false;
   if (t <= TEMP_VALID_MIN || t >= TEMP_VALID_MAX) return false;
   if (t == 85.0f) return false;  // DS18B20 power-on default, not a real measurement
-  // Spike filter: once we have a baseline, reject implausible jumps
-  if (hasValidInput && fabsf(t - lastValidInput) > TEMP_SPIKE_MAX_DELTA) {
-    Serial.print("Spike rejected: ");
-    Serial.print(t, 1);
-    Serial.print(" C (last valid: ");
-    Serial.print(lastValidInput, 1);
-    Serial.println(" C)");
-    return false;
-  }
   return true;
 }
 
