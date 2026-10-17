@@ -5,6 +5,7 @@
 #include <DallasTemperature.h>
 #include <PID_v2.h>
 #include <EEPROM.h>
+#include <base64.h>
 
 #include "secrets.h"  // WiFi, Shelly – copy secrets.h.example to secrets.h and fill in
 
@@ -94,6 +95,16 @@ bool manualState = false;
 bool forceControlUpdate = false;  // triggers immediate PID update when switching to auto
 bool shellyCurrentState = false;
 
+// Build a GET request for the Shelly; adds HTTP Basic auth when shelly_user is set
+String shellyRequest(const String& path) {
+  String request = "GET " + path + " HTTP/1.1\r\nHost: " + String(shelly_ip) + "\r\n";
+  if (shelly_user[0] != '\0') {
+    request += "Authorization: Basic " + base64::encode(String(shelly_user) + ":" + shelly_pass, false) + "\r\n";
+  }
+  request += "Connection: close\r\n\r\n";
+  return request;
+}
+
 // Shelly switch — SHELLY_TIMEOUT_MS caps blocking time if Shelly is unreachable
 void shellySwitch(bool state) {
   WiFiClient client;
@@ -104,8 +115,7 @@ void shellySwitch(bool state) {
   }
   String path = "/relay/0?turn=";
   path += state ? "on" : "off";
-  String request = "GET " + path + " HTTP/1.1\r\nHost: " + String(shelly_ip) + "\r\nConnection: close\r\n\r\n";
-  client.print(request);
+  client.print(shellyRequest(path));
   delay(10);
   client.stop();
 }
@@ -114,10 +124,17 @@ bool shellyReachable() {
   WiFiClient client;
   client.setTimeout(SHELLY_TIMEOUT_MS);
   if (!client.connect(shelly_ip, 80)) return false;
-  client.print("GET /relay/0 HTTP/1.1\r\nHost: " + String(shelly_ip) + "\r\nConnection: close\r\n\r\n");
+  client.print(shellyRequest("/relay/0"));
   unsigned long t = millis();
   while (client.connected() && (millis() - t < SHELLY_TIMEOUT_MS)) {
-    if (client.available()) { client.readString(); break; }
+    if (client.available()) {
+      // Status line is e.g. "HTTP/1.1 401 Unauthorized" when shelly_user/shelly_pass are wrong
+      String statusLine = client.readStringUntil('\n');
+      if (statusLine.indexOf(" 401") >= 0) {
+        Serial.println("WARNING: Shelly rejected login (401) – check shelly_user/shelly_pass in secrets.h");
+      }
+      break;
+    }
   }
   client.stop();
   return true;
@@ -127,7 +144,7 @@ bool shellyGetState() {
   WiFiClient client;
   client.setTimeout(SHELLY_TIMEOUT_MS);
   if (!client.connect(shelly_ip, 80)) return false;
-  client.print("GET /relay/0 HTTP/1.1\r\nHost: " + String(shelly_ip) + "\r\nConnection: close\r\n\r\n");
+  client.print(shellyRequest("/relay/0"));
   String response = "";
   unsigned long t = millis();
   while (client.connected() && (millis() - t < SHELLY_TIMEOUT_MS)) {
